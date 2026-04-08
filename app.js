@@ -22,11 +22,24 @@
     "B",
   ];
 
-  /* ---------- C メジャー・スケール上の「上の3度」（長3度/短3度を度数で自動選択） ---------- */
-  /** C メジャーのピッチクラス（C D E F G A B） */
-  const C_MAJOR_PC = [0, 2, 4, 5, 7, 9, 11];
-  /** 各度数（C=0 … B=6）から上方向のディアトニック3度までの半音数 */
-  const DIATONIC_THIRD_UP_SEMITONES = [4, 3, 3, 4, 4, 3, 3];
+  /* ---------- メジャースケール上の「上の3度」（長3度/短3度を度数で自動選択） ---------- */
+  /** メジャー各度数（ルート=0 … 6）から上のディアトニック3度までの半音数 */
+  const DIATONIC_THIRD_UP_SEMITONES_MAJOR = [4, 3, 3, 4, 4, 3, 3];
+
+  /**
+   * C メジャー相当のピッチクラス（昇順）。キー変更時は同じメジャー型7音の配列に差し替え。
+   * @type {number[]}
+   */
+  let harmonyScalePc = [0, 2, 4, 5, 7, 9, 11];
+
+  /**
+   * ハモリ3度の MIDI に加算する半音（例: -12 で1オクターブ下げ）
+   * @type {number}
+   */
+  let harmonyThirdOctaveOffsetSemitones = 0;
+
+  /** ハモリ目標 MIDI の指数平滑（0 に近いほど新値優先、1 に近いほど直前に追従） */
+  const HARMONY_MIDI_SMOOTH_ALPHA = 0.78;
 
   /** @param {number} freq */
   function midiFromFrequency(freq) {
@@ -39,17 +52,18 @@
   }
 
   /**
-   * 検出ピッチに最も近い C メジャー音（同じオクターブ付近で探索）
+   * 検出ピッチに最も近いスケール音（±12 半音で探索）
    * @param {number} midiFloat
+   * @param {number[]} scalePc スケールのピッチクラス 0–11（メジャーなら昇順7音）
    * @returns {number} 整数 MIDI
    */
-  function snapToNearestCMajorMidi(midiFloat) {
+  function snapToScaleMidi(midiFloat, scalePc) {
     const center = Math.round(midiFloat);
     let best = center;
     let bestDist = Infinity;
     for (let m = center - 12; m <= center + 12; m++) {
       const pc = ((m % 12) + 12) % 12;
-      if (C_MAJOR_PC.indexOf(pc) === -1) continue;
+      if (scalePc.indexOf(pc) === -1) continue;
       const d = Math.abs(midiFloat - m);
       if (d < bestDist) {
         bestDist = d;
@@ -60,16 +74,17 @@
   }
 
   /**
-   * C メジャー内の音から、同調の上3度（長3度または短3度）の MIDI ノート
+   * メジャースケール上の音から、同調の上3度（長3度/短3度）の MIDI ノート
    * @param {number} midiSnapped スケール上の整数 MIDI
+   * @param {number[]} scalePc harmonyScalePc と同一のスケール
    */
-  function diatonicThirdAboveInCMajor(midiSnapped) {
+  function diatonicThirdAboveInMajorScale(midiSnapped, scalePc) {
     const pc = ((midiSnapped % 12) + 12) % 12;
-    const deg = C_MAJOR_PC.indexOf(pc);
+    const deg = scalePc.indexOf(pc);
     if (deg === -1) {
       return midiSnapped + 4;
     }
-    return midiSnapped + DIATONIC_THIRD_UP_SEMITONES[deg];
+    return midiSnapped + DIATONIC_THIRD_UP_SEMITONES_MAJOR[deg];
   }
 
   /** @param {number} freq */
@@ -86,7 +101,7 @@
    */
   function createHarmonySynth(ctx) {
     const osc = ctx.createOscillator();
-    osc.type = "sine";
+    osc.type = "triangle";
     const gain = ctx.createGain();
     gain.gain.value = 0.0001;
     osc.connect(gain);
@@ -94,9 +109,9 @@
     osc.start();
 
     const peakGain = 0.14;
-    const attackTC = 0.025;
-    const releaseTC = 0.05;
-    const freqTC = 0.018;
+    const attackTC = 0.045;
+    const releaseTC = 0.1;
+    const freqTC = 0.03;
 
     return {
       setHarmonyHz(hz) {
@@ -133,8 +148,11 @@
   let pitchDetector = null;
   let mediaStream = null;
   let harmonySynth = null;
+  let micMonitorSource = null;
+  let micMonitorGain = null;
   let running = false;
   let rafId = 0;
+  let smoothedHarmonyMidi = null;
 
   function setStatus(text) {
     statusEl.textContent = text;
@@ -162,6 +180,7 @@
         if (harmonySynth) {
           harmonySynth.silence();
         }
+        smoothedHarmonyMidi = null;
       } else {
         const r = pitchDetector.results || {};
         if (r.confidence != null) {
@@ -179,15 +198,26 @@
 
           if (confOk && harmonySynth) {
             const midiIn = midiFromFrequency(frequency);
-            const snapped = snapToNearestCMajorMidi(midiIn);
-            const thirdMidi = diatonicThirdAboveInCMajor(snapped);
-            const harmonyHz = frequencyFromMidi(thirdMidi);
+            const scalePc = harmonyScalePc;
+            const snapped = snapToScaleMidi(midiIn, scalePc);
+            const rawThirdMidi =
+              diatonicThirdAboveInMajorScale(snapped, scalePc) +
+              harmonyThirdOctaveOffsetSemitones;
+            if (smoothedHarmonyMidi == null) {
+              smoothedHarmonyMidi = rawThirdMidi;
+            } else {
+              smoothedHarmonyMidi =
+                smoothedHarmonyMidi * HARMONY_MIDI_SMOOTH_ALPHA +
+                rawThirdMidi * (1 - HARMONY_MIDI_SMOOTH_ALPHA);
+            }
+            const harmonyHz = frequencyFromMidi(smoothedHarmonyMidi);
             harmonyHzEl.textContent = harmonyHz.toFixed(1);
             harmonyNoteEl.textContent = frequencyToNearestNote(harmonyHz);
             harmonySynth.setHarmonyHz(harmonyHz);
           } else {
             harmonyHzEl.textContent = "—";
             harmonyNoteEl.textContent = "—";
+            smoothedHarmonyMidi = null;
             if (harmonySynth) {
               harmonySynth.silence();
             }
@@ -197,6 +227,7 @@
           noteEl.textContent = "—";
           harmonyHzEl.textContent = "—";
           harmonyNoteEl.textContent = "—";
+          smoothedHarmonyMidi = null;
           if (harmonySynth) {
             harmonySynth.silence();
           }
@@ -268,6 +299,12 @@
 
           harmonySynth = createHarmonySynth(audioContext);
 
+          micMonitorSource = audioContext.createMediaStreamSource(mediaStream);
+          micMonitorGain = audioContext.createGain();
+          micMonitorGain.gain.value = 0.3;
+          micMonitorSource.connect(micMonitorGain);
+          micMonitorGain.connect(audioContext.destination);
+
           setStatus("Listening…");
           running = true;
           pitchLoop();
@@ -294,6 +331,18 @@
     if (harmonySynth) {
       harmonySynth.dispose();
       harmonySynth = null;
+    }
+    try {
+      if (micMonitorSource) {
+        micMonitorSource.disconnect();
+        micMonitorSource = null;
+      }
+      if (micMonitorGain) {
+        micMonitorGain.disconnect();
+        micMonitorGain = null;
+      }
+    } catch (e) {
+      /* ignore */
     }
     if (pitchDetector && typeof pitchDetector.dispose === "function") {
       pitchDetector.dispose();
