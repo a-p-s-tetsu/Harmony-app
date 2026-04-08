@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Realtime Pitch Detection (ml5.js CREPE)</title>
+    <link rel="stylesheet" href="style.css" />
+    <!-- CREPE 推論は ml5 に同梱の TensorFlow.js（ml5.tf）を使用（重複読み込みを避けるため tf は別途読み込まない） -->
+    <script src="https://unpkg.com/ml5@0.12.2/dist/ml5.min.js"></script>
+    <script src="crepe-pitch.js"></script>
+  </head>
+  <body>
+    <main class="panel">
+      <h1>Pitch Detection</h1>
+      <p class="hint">
+        HTTPS または <code>localhost</code> で開き、「Start Microphone」で許可してください。推論は ml5 に同梱の
+        <code>ml5.tf</code> と公式 CREPE モデルを使います（標準 API は信頼度 0.5 未満で Hz を返さないため、同じ計算でしきい値を下げた <code>crepe-pitch.js</code> を併用しています）。
+      </p>
+      <button type="button" id="startBtn" class="btn">Start Microphone</button>
+      <p id="status" class="status" aria-live="polite">Ready</p>
+      <section class="readouts" aria-label="検出結果">
+        <div class="readout">
+          <span class="label">Frequency</span>
+          <span id="hz" class="value">—</span>
+          <span class="unit">Hz</span>
+        </div>
+        <div class="readout">
+          <span class="label">Note</span>
+          <span id="note" class="value note">—</span>
+        </div>
+        <div class="readout">
+          <span class="label">Harmony (C major 3rd)</span>
+          <span id="harmonyHz" class="value">—</span>
+          <span class="unit">Hz</span>
+          <span id="harmonyNote" class="value note note--harmony">—</span>
+        </div>
+        <div class="readout readout--subtle">
+          <span class="label">CREPE confidence</span>
+          <span id="confidence" class="value value--sm">—</span>
+        </div>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

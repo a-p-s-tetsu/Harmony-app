@@ -1,0 +1,143 @@
+:root {
+  --bg: #0f1419;
+  --panel: #1a2332;
+  --text: #e7ecf3;
+  --muted: #8b9bb4;
+  --accent: #5b8def;
+  --accent-hover: #7aa3f5;
+  --border: #2d3a4d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.panel {
+  width: 100%;
+  max-width: 420px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.75rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.hint {
+  margin: 0 0 1.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.hint code {
+  font-size: 0.8em;
+  padding: 0.1em 0.35em;
+  background: var(--bg);
+  border-radius: 4px;
+}
+
+.btn {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.status {
+  margin: 1rem 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  min-height: 1.35em;
+}
+
+.readouts {
+  margin-top: 1.5rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.readout {
+  padding: 1rem 1.1rem;
+  background: var(--bg);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  align-items: baseline;
+  column-gap: 0.5rem;
+}
+
+.readout .label {
+  grid-column: 1 / -1;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+.readout .value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.readout .value.note {
+  grid-column: 1 / -1;
+  font-size: 2rem;
+}
+
+.readout .value.note--harmony {
+  margin-top: 0.25rem;
+  font-size: 1.65rem;
+  color: var(--accent-hover);
+}
+
+.readout .unit {
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.readout--subtle {
+  opacity: 0.92;
+}
+
+.readout .value--sm {
+  font-size: 1.25rem;
+  font-weight: 600;
+  grid-column: 1 / -1;
+}
