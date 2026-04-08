@@ -14,7 +14,7 @@
       <h1>録音 → 解析 → ハモリ再生</h1>
       <p class="hint">
         HTTPS または <code>localhost</code> で開き、「Mic/Record」で録音します。停止後に録音データを CREPE でオフライン解析し、音符列を抽出します。「Play
-        Recorded」で原音と抽出メロディに基づくハモリを同期再生します（録音中はリアルタイムピッチ表示しません）。
+        Recorded」で原音とハモリを同期再生、「ハモリのみ再生」では原音をミュートしてハモリだけ聞けます（いずれも内部では同じタイムラインで再生します）。
       </p>
       <div class="song-preset" role="group" aria-label="楽曲プリセット">
         <label class="song-preset__label" for="songPreset">楽曲</label>
@@ -32,6 +32,9 @@
         </button>
         <button type="button" id="playRecordedBtn" class="btn btn--secondary" disabled>
           Play Recorded
+        </button>
+        <button type="button" id="playHarmonyOnlyBtn" class="btn btn--secondary" disabled>
+          ハモリのみ再生
         </button>
         <div class="harmony-interval">
           <label class="harmony-interval__label" for="harmonyInterval">ハモリの間隔</label>

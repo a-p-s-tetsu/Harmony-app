@@ -7,11 +7,14 @@
   /** オフライン解析のホップ（秒）。10〜20ms 相当 */
   const ANALYSIS_HOP_SEC = 0.015;
 
-  /** ピッチ列の移動平均窓（フレーム数・奇数推奨） */
-  const PITCH_SMOOTH_WINDOW = 5;
+  /** この未満の confidence は無音扱い（Float MIDI を null） */
+  const PITCH_FRAME_CONFIDENCE_MIN = 0.5;
 
-  /** これ未満の長さの音符はノイズとして捨てる（秒） */
-  const MIN_NOTE_DURATION_SEC = 0.05;
+  /** モード量子化の半窓幅。前後7フレーム＝計15フレーム（約225ms @ 15ms hop） */
+  const MODE_WINDOW_HALF = 7;
+
+  /** これ未満の音符は隣接ノートにマージ（秒）。単独で無音に挟まれたものは削除 */
+  const SHORT_NOTE_MERGE_SEC = 0.06;
 
   const NOTE_NAMES = [
     "C",
@@ -141,7 +144,7 @@
 
     const peakGain = 0.14;
     const attackTC = 0.045;
-    const releaseTC = 0.1;
+    const releaseTC = 0.03;
     const freqTC = 0.005;
 
     return {
@@ -171,6 +174,7 @@
   const micRecordBtn = document.getElementById("micRecordBtn");
   const stopRecordBtn = document.getElementById("stopRecordBtn");
   const playRecordedBtn = document.getElementById("playRecordedBtn");
+  const playHarmonyOnlyBtn = document.getElementById("playHarmonyOnlyBtn");
   const recordedAudio = document.getElementById("recordedAudio");
   const statusEl = document.getElementById("status");
   const hzEl = document.getElementById("hz");
@@ -325,58 +329,67 @@
   }
 
   /**
-   * 生ピッチ列に移動平均（欠測は近傍の有効値のみで平均）
-   * @param {Array<{ time: number, hz: number|null }>} frames
+   * Float MIDI 列に対し、各フレームで前後 MODE_WINDOW_HALF を含む窓内の
+   * Math.round(floatMidi) の最頻値（モード）を整数 MIDI とする。窓内に有効値がなければ null。
+   * @param {Array<{ time: number, floatMidi: number|null }>} frames
+   * @param {number} halfWin
    */
-  function smoothPitchMovingAverage(frames) {
-    const half = Math.floor(PITCH_SMOOTH_WINDOW / 2);
+  function modeQuantizeFloatMidiFrames(frames, halfWin) {
+    const n = frames.length;
     const out = [];
-    for (let i = 0; i < frames.length; i++) {
-      let sum = 0;
-      let c = 0;
-      for (let k = -half; k <= half; k++) {
+    for (let i = 0; i < n; i++) {
+      const counts = new Map();
+      for (let k = -halfWin; k <= halfWin; k++) {
         const j = i + k;
-        if (j >= 0 && j < frames.length && frames[j].hz != null) {
-          sum += frames[j].hz;
-          c++;
+        if (j < 0 || j >= n) {
+          continue;
         }
+        const fm = frames[j].floatMidi;
+        if (fm == null) {
+          continue;
+        }
+        const ri = Math.round(fm);
+        counts.set(ri, (counts.get(ri) || 0) + 1);
       }
-      out.push({
-        time: frames[i].time,
-        hz: c > 0 ? sum / c : null,
+      if (counts.size === 0) {
+        out.push({ time: frames[i].time, midi: null });
+        continue;
+      }
+      let maxC = -1;
+      const ties = [];
+      counts.forEach(function (c, note) {
+        if (c > maxC) {
+          maxC = c;
+          ties.length = 0;
+          ties.push(note);
+        } else if (c === maxC) {
+          ties.push(note);
+        }
       });
+      ties.sort(function (a, b) {
+        return a - b;
+      });
+      const modeMidi = ties[Math.floor(ties.length / 2)];
+      out.push({ time: frames[i].time, midi: modeMidi });
     }
     return out;
   }
 
   /**
-   * 平滑化 → MIDI クオンタイズ
-   * @param {Array<{ time: number, hz: number|null }>} frames
-   */
-  function framesToQuantizedMidi(frames) {
-    return frames.map(function (f) {
-      return {
-        time: f.time,
-        midi: f.hz != null ? Math.round(midiFromFrequency(f.hz)) : null,
-      };
-    });
-  }
-
-  /**
-   * 同じ MIDI が続く区間を音符化し、短すぎる区間を除去
+   * 整数 MIDI 列から連続同一音を音符化（無音フレームは区切り）
    * @param {Array<{ time: number, midi: number|null }>} frames
    * @param {number} hopSec
+   * @returns {Array<{ startTime: number, endTime: number, midiNote: number }>}
    */
-  function segmentMidiFramesToNotes(frames, hopSec) {
-    /** @type {Array<{ startTime: number, endTime: number, midiNote: number }>} */
+  function segmentQuantizedFramesToNotes(frames, hopSec) {
     const notes = [];
-    if (frames.length === 0) {
-      return notes;
-    }
-
     let i = 0;
     while (i < frames.length) {
       const m = frames[i].midi;
+      if (m == null) {
+        i += 1;
+        continue;
+      }
       let j = i + 1;
       while (j < frames.length && frames[j].midi === m) {
         j += 1;
@@ -384,16 +397,98 @@
       const startTime = frames[i].time;
       const endTime =
         j < frames.length ? frames[j].time : frames[j - 1].time + hopSec;
-      if (m != null && endTime - startTime >= MIN_NOTE_DURATION_SEC) {
-        notes.push({
-          startTime: startTime,
-          endTime: endTime,
-          midiNote: m,
-        });
-      }
+      notes.push({
+        startTime: startTime,
+        endTime: endTime,
+        midiNote: m,
+      });
       i = j;
     }
     return notes;
+  }
+
+  /**
+   * 短い音符を削除せず隣接に吸収。前後が同音なら1つにマージ。
+   * @param {Array<{ startTime: number, endTime: number, midiNote: number }>} notes
+   * @param {number} minDurSec
+   */
+  function mergeShortNotesIntoNeighbors(notes, minDurSec) {
+    const notesCopy = notes.map(function (n) {
+      return {
+        startTime: n.startTime,
+        endTime: n.endTime,
+        midiNote: n.midiNote,
+      };
+    });
+    let guard = 0;
+    const maxIter = Math.max(notesCopy.length * 3, 16);
+    while (guard++ < maxIter) {
+      const idx = notesCopy.findIndex(function (n) {
+        return n.endTime - n.startTime < minDurSec;
+      });
+      if (idx < 0) {
+        break;
+      }
+      const S = notesCopy[idx];
+      const prev = idx > 0 ? notesCopy[idx - 1] : null;
+      const next = idx < notesCopy.length - 1 ? notesCopy[idx + 1] : null;
+
+      if (!prev && !next) {
+        notesCopy.splice(idx, 1);
+        continue;
+      }
+      if (!prev && next) {
+        next.startTime = S.startTime;
+        notesCopy.splice(idx, 1);
+        continue;
+      }
+      if (prev && !next) {
+        prev.endTime = S.endTime;
+        notesCopy.splice(idx, 1);
+        continue;
+      }
+      if (prev.midiNote === next.midiNote) {
+        prev.endTime = next.endTime;
+        notesCopy.splice(idx, 2);
+        continue;
+      }
+      const dPrev = prev.endTime - prev.startTime;
+      const dNext = next.endTime - next.startTime;
+      if (dPrev >= dNext) {
+        prev.endTime = S.endTime;
+        notesCopy.splice(idx, 1);
+      } else {
+        next.startTime = S.startTime;
+        notesCopy.splice(idx, 1);
+      }
+    }
+    return notesCopy;
+  }
+
+  /**
+   * CREPE raw フレームから安定した音符列へ（Float MIDI + モード量子化 + セグメント + 短音マージ）
+   * @param {Array<{ time: number, hz: number|null, confidence: number }>} rawFrames
+   * @param {number} hopSec
+   * @returns {Array<{ startTime: number, endTime: number, midiNote: number }>}
+   */
+  function extractStableNotes(rawFrames, hopSec) {
+    const floatFrames = rawFrames.map(function (f) {
+      const ok =
+        f.confidence >= PITCH_FRAME_CONFIDENCE_MIN &&
+        f.hz != null &&
+        f.hz > 0;
+      return {
+        time: f.time,
+        floatMidi: ok ? midiFromFrequency(f.hz) : null,
+      };
+    });
+
+    const modeFrames = modeQuantizeFloatMidiFrames(
+      floatFrames,
+      MODE_WINDOW_HALF
+    );
+    const segmented = segmentQuantizedFramesToNotes(modeFrames, hopSec);
+    return mergeShortNotesIntoNeighbors(segmented, SHORT_NOTE_MERGE_SEC);
   }
 
   /**
@@ -447,9 +542,7 @@
       }
     }
 
-    const smoothed = smoothPitchMovingAverage(rawFrames);
-    const midiFrames = framesToQuantizedMidi(smoothed);
-    extractedNotes = segmentMidiFramesToNotes(midiFrames, ANALYSIS_HOP_SEC);
+    extractedNotes = extractStableNotes(rawFrames, ANALYSIS_HOP_SEC);
     return true;
   }
 
@@ -526,6 +619,9 @@
     extractedNotes = [];
     updateNoteCountReadout();
     playRecordedBtn.disabled = true;
+    if (playHarmonyOnlyBtn) {
+      playHarmonyOnlyBtn.disabled = true;
+    }
 
     recordedChunks = [];
     const mime = pickRecorderMimeType();
@@ -557,9 +653,12 @@
       analyzeRecordingFromBlob(blob)
         .then(function () {
           setStatus(
-            "解析が完了しました。Play Recorded でハモリ付き再生できます。"
+            "解析が完了しました。Play Recorded または「ハモリのみ再生」で聞けます。"
           );
           playRecordedBtn.disabled = false;
+          if (playHarmonyOnlyBtn) {
+            playHarmonyOnlyBtn.disabled = false;
+          }
           updateNoteCountReadout();
         })
         .catch(function (e) {
@@ -569,6 +668,9 @@
             "解析に失敗しました: " + (e.message || String(e))
           );
           playRecordedBtn.disabled = false;
+          if (playHarmonyOnlyBtn) {
+            playHarmonyOnlyBtn.disabled = false;
+          }
           updateNoteCountReadout();
         });
     };
@@ -630,6 +732,7 @@
     if (recordedAudio && !recordedAudio.paused) {
       recordedAudio.pause();
       recordedAudio.currentTime = 0;
+      recordedAudio.muted = false;
     }
     stopHarmonyPlaybackLoop();
     if (harmonySynth) {
@@ -658,7 +761,11 @@
     }
   }
 
-  function onPlayRecordedClick() {
+  /**
+   * 解析済みタイムラインに同期して再生。harmonyOnly 時は recordedAudio をミュートしハモリシンセのみ聞こえる。
+   * @param {boolean} harmonyOnly
+   */
+  function startSyncedPlayback(harmonyOnly) {
     if (!recordedAudio.src || !appAudioContext) {
       return;
     }
@@ -669,13 +776,16 @@
     if (micMonitorGain) {
       micMonitorGain.gain.value = 0;
     }
+    recordedAudio.muted = !!harmonyOnly;
     recordedAudio.currentTime = 0;
     if (appAudioContext.state === "suspended") {
       appAudioContext.resume().catch(function (e) {
         console.error(e);
       });
     }
-    setStatus("再生中（ハモリ付き）…");
+    setStatus(
+      harmonyOnly ? "再生中（ハモリのみ）…" : "再生中（ハモリ付き）…"
+    );
     recordedAudio
       .play()
       .then(function () {
@@ -683,6 +793,7 @@
       })
       .catch(function (e) {
         console.error(e);
+        recordedAudio.muted = false;
         setStatus("再生を開始できませんでした。");
         if (micMonitorGain) {
           micMonitorGain.gain.value = 0.3;
@@ -690,8 +801,17 @@
       });
   }
 
+  function onPlayRecordedClick() {
+    startSyncedPlayback(false);
+  }
+
+  function onPlayHarmonyOnlyClick() {
+    startSyncedPlayback(true);
+  }
+
   recordedAudio.addEventListener("ended", function () {
     stopHarmonyPlaybackLoop();
+    recordedAudio.muted = false;
     if (harmonySynth) {
       harmonySynth.silence();
     }
@@ -713,6 +833,12 @@
   playRecordedBtn.addEventListener("click", function () {
     onPlayRecordedClick();
   });
+
+  if (playHarmonyOnlyBtn) {
+    playHarmonyOnlyBtn.addEventListener("click", function () {
+      onPlayHarmonyOnlyClick();
+    });
+  }
 
   if (songPresetEl) {
     songPresetEl.addEventListener("change", function () {
