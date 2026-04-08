@@ -185,5 +185,99 @@
     this.model = null;
   };
 
+  /**
+   * モノラル PCM を 16 kHz にリサンプル（CREPE は 1024 サンプル @ 16 kHz の窓を想定）。
+   * @param {Float32Array} channelData
+   * @param {number} sampleRate
+   * @returns {Float32Array}
+   */
+  function resampleFullChannelTo16k(channelData, sampleRate) {
+    var n = channelData.length;
+    if (n === 0) {
+      return new Float32Array(0);
+    }
+    var outLen = Math.ceil((n / sampleRate) * 16000);
+    if (outLen < 1024) {
+      outLen = 1024;
+    }
+    var out = new Float32Array(outLen);
+    var sr = sampleRate;
+    for (var i = 0; i < outLen; i++) {
+      var srcPos = (i / 16000) * sr;
+      var left = Math.floor(srcPos);
+      if (left >= n - 1) {
+        out[i] = channelData[n - 1];
+      } else {
+        var p = srcPos - left;
+        out[i] = (1 - p) * channelData[left] + p * channelData[left + 1];
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 学習済み CREPE モデルに 1024 サンプル（16 kHz）を渡して 1 フレーム推論する。
+   * @param {*} model tf.LayersModel
+   * @param {Float32Array} frame1024
+   * @returns {{ frequency: number|null, confidence: number, predictedHz: number }}
+   */
+  function predictPitchFromFrame(model, frame1024) {
+    var tf = getTf();
+    if (!tf || !model) {
+      return { frequency: null, confidence: 0, predictedHz: 0 };
+    }
+    var freq = null;
+    var conf = 0;
+    var predHz = 0;
+    tf.tidy(function () {
+      var centMapping = tf.add(tf.linspace(0, 7180, 360), tf.tensor(1997.3794084376191));
+      var frame = tf.tensor(frame1024);
+      var zeromean = tf.sub(frame, tf.mean(frame));
+      var framestd = tf.tensor(tf.norm(zeromean).dataSync()[0] / Math.sqrt(1024));
+      var normalized = tf.div(zeromean, framestd);
+      var input = normalized.reshape([1, 1024]);
+      var activation = model.predict([input]).reshape([360]);
+      var confidence = activation.max().dataSync()[0];
+      var center = activation.argMax().dataSync()[0];
+
+      conf = confidence;
+
+      var start = Math.max(0, center - 4);
+      var end = Math.min(360, center + 5);
+      var weights = activation.slice([start], [end - start]);
+      var cents = centMapping.slice([start], [end - start]);
+
+      var products = tf.mul(weights, cents);
+      var productSum = products.dataSync().reduce(function (a, b) {
+        return a + b;
+      }, 0);
+      var weightSum = weights.dataSync().reduce(function (a, b) {
+        return a + b;
+      }, 0);
+      var predictedCent = productSum / weightSum;
+      predHz = 10 * Math.pow(2, predictedCent / 1200.0);
+
+      freq = confidence > MIN_CONFIDENCE ? predHz : null;
+    });
+    return { frequency: freq, confidence: conf, predictedHz: predHz };
+  }
+
+  /**
+   * MediaStream なしでモデルだけ読み込む（オフライン解析用）。
+   * @param {string} modelPath
+   */
+  async function loadCrepeModelOnly(modelPath) {
+    var tf = getTf();
+    if (!tf) {
+      throw new Error("TensorFlow.js が見つかりません（ml5.js を先に読み込んでください）。");
+    }
+    await tf.ready();
+    return await tf.loadLayersModel(modelPath + "/model.json");
+  }
+
+  window.crepeResampleFullTo16k = resampleFullChannelTo16k;
+  window.crepePredictPitchFrame = predictPitchFromFrame;
+  window.crepeLoadModelOnly = loadCrepeModelOnly;
+
   window.CrepePitchDetection = CrepePitchDetection;
 })();

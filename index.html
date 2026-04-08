@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Realtime Pitch Detection (ml5.js CREPE)</title>
+    <title>Harmony — 録音解析 &amp; 同期再生</title>
     <link rel="stylesheet" href="style.css" />
     <!-- CREPE 推論は ml5 に同梱の TensorFlow.js（ml5.tf）を使用（重複読み込みを避けるため tf は別途読み込まない） -->
     <script src="https://unpkg.com/ml5@0.12.2/dist/ml5.min.js"></script>
@@ -11,11 +11,20 @@
   </head>
   <body>
     <main class="panel">
-      <h1>Pitch Detection</h1>
+      <h1>録音 → 解析 → ハモリ再生</h1>
       <p class="hint">
-        HTTPS または <code>localhost</code> で開き、「Mic/Record」でマイク許可と録音開始を行います。推論は ml5 に同梱の
-        <code>ml5.tf</code> と公式 CREPE モデルを使います（標準 API は信頼度 0.5 未満で Hz を返さないため、同じ計算でしきい値を下げた <code>crepe-pitch.js</code> を併用しています）。
+        HTTPS または <code>localhost</code> で開き、「Mic/Record」で録音します。停止後に録音データを CREPE でオフライン解析し、音符列を抽出します。「Play
+        Recorded」で原音と抽出メロディに基づくハモリを同期再生します（録音中はリアルタイムピッチ表示しません）。
       </p>
+      <div class="song-preset" role="group" aria-label="楽曲プリセット">
+        <label class="song-preset__label" for="songPreset">楽曲</label>
+        <select id="songPreset" class="song-preset__select">
+          <option value="custom" selected>カスタム（自分で設定する）</option>
+          <option value="cherry">スピッツ - チェリー (サビ)</option>
+          <option value="parallel_5th">（おまけ）どんな曲でも合う 5度上</option>
+        </select>
+        <div id="currentSettings" class="current-settings" aria-live="polite"></div>
+      </div>
       <div class="controls" role="group" aria-label="マイク・録音・再生">
         <button type="button" id="micRecordBtn" class="btn">Mic/Record</button>
         <button type="button" id="stopRecordBtn" class="btn btn--secondary" disabled>
@@ -48,13 +57,13 @@
           <span id="note" class="value note">—</span>
         </div>
         <div class="readout">
-          <span class="label">Harmony (parallel)</span>
+          <span class="label">Harmony</span>
           <span id="harmonyHz" class="value">—</span>
           <span class="unit">Hz</span>
           <span id="harmonyNote" class="value note note--harmony">—</span>
         </div>
         <div class="readout readout--subtle">
-          <span class="label">CREPE confidence</span>
+          <span class="label">抽出ノート数</span>
           <span id="confidence" class="value value--sm">—</span>
         </div>
       </section>
