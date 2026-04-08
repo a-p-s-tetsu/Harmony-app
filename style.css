@@ -76,6 +76,23 @@ h1 {
   cursor: not-allowed;
 }
 
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.btn--secondary {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--border);
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: rgba(91, 141, 239, 0.12);
+  border-color: var(--accent);
+}
+
 .status {
   margin: 1rem 0 0;
   font-size: 0.9rem;
