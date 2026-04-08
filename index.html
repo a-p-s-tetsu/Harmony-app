@@ -24,6 +24,16 @@
         <button type="button" id="playRecordedBtn" class="btn btn--secondary" disabled>
           Play Recorded
         </button>
+        <div class="harmony-interval">
+          <label class="harmony-interval__label" for="harmonyInterval">ハモリの間隔</label>
+          <select id="harmonyInterval" class="harmony-interval__select">
+            <option value="7" selected>完全5度上 (+7半音)</option>
+            <option value="-5">完全4度下 (-5半音)</option>
+            <option value="4">長3度上 (+4半音)</option>
+            <option value="3">短3度上 (+3半音)</option>
+            <option value="-12">1オクターブ下 (-12半音)</option>
+          </select>
+        </div>
       </div>
       <audio id="recordedAudio" controls style="display: none;"></audio>
       <p id="status" class="status" aria-live="polite">Ready</p>
@@ -38,7 +48,7 @@
           <span id="note" class="value note">—</span>
         </div>
         <div class="readout">
-          <span class="label">Harmony (C major 3rd)</span>
+          <span class="label">Harmony (parallel)</span>
           <span id="harmonyHz" class="value">—</span>
           <span class="unit">Hz</span>
           <span id="harmonyNote" class="value note note--harmony">—</span>

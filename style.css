@@ -93,6 +93,30 @@ h1 {
   border-color: var(--accent);
 }
 
+.harmony-interval {
+  margin-top: 0.25rem;
+}
+
+.harmony-interval__label {
+  display: block;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+.harmony-interval__select {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.95rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
 .status {
   margin: 1rem 0 0;
   font-size: 0.9rem;

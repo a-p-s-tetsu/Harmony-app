@@ -22,22 +22,6 @@
     "B",
   ];
 
-  /* ---------- メジャースケール上の「上の3度」（長3度/短3度を度数で自動選択） ---------- */
-  /** メジャー各度数（ルート=0 … 6）から上のディアトニック3度までの半音数 */
-  const DIATONIC_THIRD_UP_SEMITONES_MAJOR = [4, 3, 3, 4, 4, 3, 3];
-
-  /**
-   * C メジャー相当のピッチクラス（昇順）。キー変更時は同じメジャー型7音の配列に差し替え。
-   * @type {number[]}
-   */
-  let harmonyScalePc = [0, 2, 4, 5, 7, 9, 11];
-
-  /**
-   * ハモリ3度の MIDI に加算する半音（例: -12 で1オクターブ下げ）
-   * @type {number}
-   */
-  let harmonyThirdOctaveOffsetSemitones = 0;
-
   /** ハモリ目標 MIDI の指数平滑（0 に近いほど新値優先、1 に近いほど直前に追従） */
   const HARMONY_MIDI_SMOOTH_ALPHA = 0.78;
 
@@ -49,42 +33,6 @@
   /** @param {number} midi */
   function frequencyFromMidi(midi) {
     return 440 * Math.pow(2, (midi - 69) / 12);
-  }
-
-  /**
-   * 検出ピッチに最も近いスケール音（±12 半音で探索）
-   * @param {number} midiFloat
-   * @param {number[]} scalePc スケールのピッチクラス 0–11（メジャーなら昇順7音）
-   * @returns {number} 整数 MIDI
-   */
-  function snapToScaleMidi(midiFloat, scalePc) {
-    const center = Math.round(midiFloat);
-    let best = center;
-    let bestDist = Infinity;
-    for (let m = center - 12; m <= center + 12; m++) {
-      const pc = ((m % 12) + 12) % 12;
-      if (scalePc.indexOf(pc) === -1) continue;
-      const d = Math.abs(midiFloat - m);
-      if (d < bestDist) {
-        bestDist = d;
-        best = m;
-      }
-    }
-    return best;
-  }
-
-  /**
-   * メジャースケール上の音から、同調の上3度（長3度/短3度）の MIDI ノート
-   * @param {number} midiSnapped スケール上の整数 MIDI
-   * @param {number[]} scalePc harmonyScalePc と同一のスケール
-   */
-  function diatonicThirdAboveInMajorScale(midiSnapped, scalePc) {
-    const pc = ((midiSnapped % 12) + 12) % 12;
-    const deg = scalePc.indexOf(pc);
-    if (deg === -1) {
-      return midiSnapped + 4;
-    }
-    return midiSnapped + DIATONIC_THIRD_UP_SEMITONES_MAJOR[deg];
   }
 
   /** @param {number} freq */
@@ -147,6 +95,7 @@
   const harmonyHzEl = document.getElementById("harmonyHz");
   const harmonyNoteEl = document.getElementById("harmonyNote");
   const confidenceEl = document.getElementById("confidence");
+  const harmonyIntervalEl = document.getElementById("harmonyInterval");
 
   let appAudioContext = null;
   let pitchDetector = null;
@@ -350,17 +299,17 @@
 
           if (confOk && harmonySynth) {
             const midiIn = midiFromFrequency(frequency);
-            const scalePc = harmonyScalePc;
-            const snapped = snapToScaleMidi(midiIn, scalePc);
-            const rawThirdMidi =
-              diatonicThirdAboveInMajorScale(snapped, scalePc) +
-              harmonyThirdOctaveOffsetSemitones;
+            const intervalSemi = harmonyIntervalEl
+              ? parseInt(harmonyIntervalEl.value, 10)
+              : 7;
+            const offsetSemi = Number.isNaN(intervalSemi) ? 7 : intervalSemi;
+            const rawHarmonyMidi = midiIn + offsetSemi;
             if (smoothedHarmonyMidi == null) {
-              smoothedHarmonyMidi = rawThirdMidi;
+              smoothedHarmonyMidi = rawHarmonyMidi;
             } else {
               smoothedHarmonyMidi =
                 smoothedHarmonyMidi * HARMONY_MIDI_SMOOTH_ALPHA +
-                rawThirdMidi * (1 - HARMONY_MIDI_SMOOTH_ALPHA);
+                rawHarmonyMidi * (1 - HARMONY_MIDI_SMOOTH_ALPHA);
             }
             const harmonyHz = frequencyFromMidi(smoothedHarmonyMidi);
             harmonyHzEl.textContent = harmonyHz.toFixed(1);
